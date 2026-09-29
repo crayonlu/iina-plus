@@ -166,6 +166,13 @@ enum HTTPHandler {
                 outbound: outbound
             )
 
+        case (_, .GET) where url.hasPrefix("/douyu/replay/"):
+            try await handleDouyuReplayRequest(
+                url: url,
+                parameters: parameters,
+                outbound: outbound
+            )
+
         case (_, .GET) where url.starts(with: "/video.mp4"):
             guard let path = Bundle.main.path(forResource: "empty", ofType: "m4a"),
                   let data = FileManager.default.contents(atPath: path) else { return }
@@ -174,6 +181,66 @@ enum HTTPHandler {
         default:
             try await sendBadRequest(outbound: outbound)
         }
+    }
+
+    // MARK: - Douyu Replay
+
+    /// 斗鱼回放的两条本地路由：
+    /// - `/douyu/replay/{hash}/playlist.m3u?level=&p=&up=` 返回分P 播放列表，条目是稳定的本地地址
+    /// - `/douyu/replay/{hash}/stream.m3u8?level=` 在真正播放时现签，并直接返回补成绝对地址的 m3u8
+    /// 分片不经本地转发：签名有 2 小时有效期，现签可以规避长场次播到后半段时地址已过期。
+    private static func handleDouyuReplayRequest(
+        url: String,
+        parameters: [String: String],
+        outbound: NIOAsyncChannelOutboundWriter<HTTPPart<HTTPResponseHead, ByteBuffer>>
+    ) async throws {
+        let components = url.split(separator: "/").map(String.init)
+        guard components.count >= 4, components[0] == "douyu", components[1] == "replay" else {
+            try await sendBadRequest(outbound: outbound)
+            return
+        }
+        let hashId = components[2]
+        let level = Int(parameters["level"] ?? "") ?? 0
+        let douyu = await Processes.shared.videoDecoder.douyu
+
+        switch components[3] {
+        case "playlist.m3u":
+            var hashes = [hashId]
+            let partNum = Int(parameters["p"] ?? "") ?? 0
+            if partNum > 0,
+               let upID = parameters["up"], !upID.isEmpty,
+               let parts = try? await douyu.replayParts(hashId: hashId, upId: upID) {
+                let following = parts.filter { $0.partNum >= partNum }
+                if !following.isEmpty {
+                    hashes = following.map(\.hashId)
+                }
+            }
+            let body = douyuReplayPlaylist(hashes: hashes, level: level)
+            try await sendResponse(outbound: outbound,
+                                   bodyData: body,
+                                   contentType: "audio/x-mpegurl")
+        case "stream.m3u8":
+            guard let playlist = try? await douyu.replayPlaylist(hashId: hashId, level: level),
+                  !playlist.isEmpty else {
+                Log("Douyu replay: no stream url for \(hashId) level \(level)")
+                try await sendBadRequest(outbound: outbound)
+                return
+            }
+            try await sendResponse(outbound: outbound,
+                                   bodyData: Data(playlist.utf8),
+                                   contentType: "application/vnd.apple.mpegurl")
+        default:
+            try await sendBadRequest(outbound: outbound)
+        }
+    }
+
+    private static func douyuReplayPlaylist(hashes: [String], level: Int) -> Data {
+        var lines = ["#EXTM3U"]
+        for hash in hashes {
+            lines.append("#EXTINF:-1 ,douyu replay \(hash)")
+            lines.append(DouyuReplayURL.stream(hashId: hash, level: level))
+        }
+        return Data((lines.joined(separator: "\n") + "\n").utf8)
     }
 
     // MARK: - Helpers
@@ -186,11 +253,15 @@ enum HTTPHandler {
 
     private static func sendResponse(
         outbound: NIOAsyncChannelOutboundWriter<HTTPPart<HTTPResponseHead, ByteBuffer>>,
-        bodyData: Data
+        bodyData: Data,
+        contentType: String? = nil
     ) async throws {
         var newHeaders = HTTPHeaders()
         newHeaders.add(name: "Content-Length", value: "\(bodyData.count)")
         newHeaders.add(name: "Connection", value: "close")
+        if let contentType {
+            newHeaders.add(name: "Content-Type", value: contentType)
+        }
 
         let head = HTTPResponseHead(version: .http1_1, status: .ok, headers: newHeaders)
         var buffer = ByteBufferAllocator().buffer(capacity: bodyData.count)
@@ -224,4 +295,5 @@ enum HTTPHandler {
             .end(nil),
         ])
     }
+
 }

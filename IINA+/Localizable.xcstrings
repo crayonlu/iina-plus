@@ -151,6 +151,57 @@
         }
       }
     },
+    "Douyu.Replay.Watched" : {
+      "comment" : "Watched",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Watched"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已看完"
+          }
+        }
+      }
+    },
+    "Douyu.Replay.Progress" : {
+      "comment" : "Progress %d%%",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Watched %d%%"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已看 %d%%"
+          }
+        }
+      }
+    },
+    "Douyu.Replay.MenuItem" : {
+      "comment" : "Douyu Replays",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Douyu Replays"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "直播回放"
+          }
+        }
+      }
+    },
     "Douyu:" : {
 
     },
@@ -394,6 +445,23 @@
         }
       }
     },
+    "SupportSites.DouyuReplay" : {
+      "comment" : "Douyu Replay",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Douyu Replay"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "斗鱼回放"
+          }
+        }
+      }
+    },
     "SupportSites.Huya" : {
       "comment" : "Huya",
       "localizations" : {
@@ -458,6 +526,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "出了些问题."
+          }
+        }
+      }
+    },
+    "VideoGetError.douyuReplayEmpty" : {
+      "comment" : "No replay found",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No replay records found."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未找到回放录像。"
           }
         }
       }

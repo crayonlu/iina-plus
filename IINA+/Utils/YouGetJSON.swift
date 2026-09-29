@@ -82,6 +82,9 @@ struct YouGetJSON: Unmarshaling, Codable {
 
     var site: SupportSites = .unsupported
 	
+	/// 每次播放才决定的额外 mpv 参数（如回放的续播位置），由 prepareVideoUrl 填充。
+	var extraMpvOptions: [String] = []
+	
 	var mpvDashOptions: [String] {
 		var args = mpvOptions
 		switch site {
@@ -118,16 +121,26 @@ struct YouGetJSON: Unmarshaling, Codable {
 		case .huya:
 			// Huya goes through the local HuyaProxy; no referrer/UA/reconnect needed
 			args.append("\(MPVOption.ProgramBehavior.ytdl)=no")
+		case .douyuVod:
+			// 地址是 IINA+ 的本地回放列表，内容由本地服务器现签后直接返回。
+			// mpv 默认会按上次的列表位置续播（playlist-start=auto），这里要求始终从点开的那一分P开始。
+			// 注意 mpv 的 index 从 0 起算。
+			args.append(contentsOf: [
+				"\(MPVOption.ProgramBehavior.ytdl)=no",
+				"\(MPVOption.PlaybackControl.playlistStart)=0"
+			])
 		default:
 			args.append(contentsOf: ["\(MPVOption.ProgramBehavior.ytdl)=no"])
 		}
         
         // reconnect
         // https://github.com/mpv-player/mpv/issues/8779#issuecomment-1011066498
-        if site != .huya {
+        if site != .huya, site != .douyuVod {
             args.append("\(MPVOption.Miscellaneous.streamLavfO)=reconnect_streamed=yes")
         }
         
+		args.append(contentsOf: extraMpvOptions)
+		
 		return args
     }
     
@@ -255,6 +268,9 @@ struct YouGetJSON: Unmarshaling, Codable {
             return streams[key]?.url
         case .huya:
             return streams[key]?.url
+		case .douyuVod:
+			// 已经是 IINA+ 的本地回放列表地址，不要再套临时 m3u
+			return streams[key]?.url
         case .local:
             return streams.first?.value.url
         default:
@@ -430,5 +446,12 @@ struct Stream: Unmarshaling, Codable {
     
     init(url: String) {
         self.url = url
+    }
+    
+    /// 逐档原样构造（斗鱼回放等自己解析清晰度列表的站点用）。
+    init(url: String, quality: Int, qualityIndex: Int) {
+        self.url = url
+        self.quality = quality
+        self.qualityIndex = qualityIndex
     }
 }

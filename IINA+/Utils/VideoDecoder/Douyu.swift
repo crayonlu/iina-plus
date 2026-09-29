@@ -13,6 +13,9 @@ import CryptoSwift
 import WebKit
 
 actor Douyu: SupportSiteProtocol {
+	/// 回放播放页缓存（hash_id → point_id / 签名脚本），见 DouyuReplay.swift
+	var vodPageCache: [String: (page: DouyuVodPage, date: Date)] = [:]
+
 	func liveInfo(_ url: String) async throws -> any LiveInfo {
 		let rid = try await getDouyuHtml(url).roomId
 		let id = Int(rid) ?? -1
@@ -336,6 +339,8 @@ struct DouyuInfo: Unmarshaling, LiveInfo {
     var isLiving = false
     var cover: String = ""
     var site: SupportSites = .douyu
+    /// 回放（v.douyu.com）用的作者 ID
+    var upID: String = ""
     
     init(object: MarshaledObject) throws {
         title = try object.value(for: "room.room_name")
@@ -345,6 +350,7 @@ struct DouyuInfo: Unmarshaling, LiveInfo {
 //        isLiving = try object.value(for: "room.show_status") == 1 && object.value(for: "room.videoLoop") != 0
         
         cover = try object.value(for: "room.room_pic")
+        upID = (try? object.value(for: "room.up_id")) ?? ""
     }
 }
 

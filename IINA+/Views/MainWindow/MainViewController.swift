@@ -163,6 +163,9 @@ class MainViewController: NSViewController {
     
     var bookmarkArrayCountObserver: NSKeyValueObservation?
     
+    /// 书签右键菜单里的「直播回放」，按当前书签动态增删
+    var douyuReplayMenuItem: NSMenuItem?
+    
     var isSearching = false {
         didSet {
             DispatchQueue.main.async {
@@ -226,6 +229,7 @@ class MainViewController: NSViewController {
         super.viewDidLoad()
         
         configureBilibiliTableView()
+        initDouyuReplayMenuItem()
         
         dataManager.requestData().forEach {
             $0.state = LiveState.none.raw
@@ -435,6 +439,10 @@ class MainViewController: NSViewController {
 					s += NSLocalizedString("VideoGetError.needVip", comment: "need vip.")
 				case VideoGetError.needLogin:
 					s += NSLocalizedString("VideoGetError.needLogin", comment: "need login.")
+				case VideoGetError.douyuReplayEmpty:
+					s += NSLocalizedString("VideoGetError.douyuReplayEmpty", comment: "No replay found")
+				case VideoGetError.douyuReplayFailed:
+					s += NSLocalizedString("VideoGetError.default", comment: "something went wrong.")
 				default:
 					s += NSLocalizedString("VideoGetError.default", comment: "something went wrong.")
 				}
@@ -897,8 +905,8 @@ class MainViewController: NSViewController {
             case .offline:
                 f = "state == 0"
             case .other:
-                // Video -99, none -1
-                f = "state == -1 || state == -99"
+                // Video -99, none -1, replay 2
+                f = "state == -1 || state == -99 || state == 2"
             }
         }
         
@@ -1128,6 +1136,9 @@ extension MainViewController: NSMenuDelegate {
         case siteFilterMenu:
             initLiveSiteMenu()
         default:
+            if menu == bookmarkTableView.menu {
+                initDouyuReplayMenuItem()
+            }
             return
         }
     }
@@ -1190,4 +1201,182 @@ extension NSTableView {
             return selectedRowIndexes
         }
     }
+}
+
+// MARK: - 斗鱼回放
+
+extension MainViewController {
+	private func clickedBookmarkRow() -> Int {
+		let row = bookmarkTableView.clickedRow
+		if row >= 0, row < bookmarks.count {
+			return row
+		}
+		let selected = bookmarkTableView.selectedRow
+		return selected >= 0 && selected < bookmarks.count ? selected : -1
+	}
+
+	/// 右键菜单里的「直播回放」只在斗鱼直播间书签上出现。
+	func initDouyuReplayMenuItem() {
+		guard let menu = bookmarkTableView.menu else {
+			Log("Douyu replay: bookmark menu not found.")
+			return
+		}
+		if let item = douyuReplayMenuItem {
+			menu.removeItem(item)
+			douyuReplayMenuItem = nil
+		}
+		guard let row = clickedBookmarkRowIfValid(),
+			  SupportSites(url: bookmarks[row].url) == .douyu else {
+			return
+		}
+		let item = NSMenuItem(title: NSLocalizedString("Douyu.Replay.MenuItem", comment: "Douyu Replays"),
+							  action: #selector(douyuReplays(_:)),
+							  keyEquivalent: "")
+		item.target = self
+		menu.addItem(item)
+		douyuReplayMenuItem = item
+	}
+
+	private func clickedBookmarkRowIfValid() -> Int? {
+		let row = clickedBookmarkRow()
+		return row >= 0 ? row : nil
+	}
+
+	@IBAction func douyuReplays(_ sender: NSMenuItem) {
+		guard let row = clickedBookmarkRowIfValid() else { return }
+		let url = bookmarks[row].url
+		Task {
+			await showDouyuReplays(url)
+		}
+	}
+
+	/// 拉取该房间的历史直播录像，按「场次 → 分P」两层级展示在 SelectVideo 列表里。
+	func showDouyuReplays(_ roomUrl: String) async {
+		progressStatusChanged(true)
+		defer {
+			progressStatusChanged(false)
+		}
+		do {
+			let douyu = await Processes.shared.videoDecoder.douyu
+			let rid = try await douyu.getDouyuHtml(roomUrl).roomId
+			let sessions = try await douyu.replaySessions(roomId: rid)
+			guard !sessions.isEmpty else { throw VideoGetError.douyuReplayEmpty }
+
+			let partsByShow = await loadReplayParts(sessions: sessions, douyu: douyu)
+			var nodes: [VideoTreeNode] = []
+			for session in sessions {
+				let parts = partsByShow[session.showId] ?? []
+				var leaves: [VideoTreeNode] = []
+				let items: [(hashId: String, title: String, remark: String, duration: String, durationSecs: Int, partNum: Int, cover: String)]
+				if parts.isEmpty {
+					items = [(session.hashId, session.title, session.timeFormat, session.durationStr,
+							  session.durationSecs, 1, session.cover)]
+				} else {
+					items = parts.map { ($0.hashId, $0.title, $0.remark, $0.durationStr, $0.durationSecs, $0.partNum, $0.cover) }
+				}
+				for item in items {
+					let progress = await ReplayProgressStore.shared.refresh(id: item.hashId)
+					leaves.append(VideoTreeNode(site: .douyuVod,
+												index: item.partNum,
+												title: partTitle(item.remark, item.duration, progress: progress),
+												id: item.hashId,
+												url: "https://v.douyu.com/show/\(item.hashId)",
+												coverUrl: URL(string: item.cover),
+												duration: item.durationSecs))
+				}
+				guard !leaves.isEmpty else { continue }
+				nodes.append(VideoTreeNode(title: sessionTitle(session), children: leaves))
+			}
+			guard !nodes.isEmpty else { throw VideoGetError.douyuReplayEmpty }
+			showSelectVideo("", treeNodes: nodes, currentItem: 0)
+		} catch let error {
+			Log("Douyu replay failed: \(error)")
+			await MainActor.run {
+				showDouyuReplayAlert(error)
+			}
+		}
+	}
+
+	/// 每个场次一次请求；并发上限 4（20 场实测约 1.1s，无风控）。
+	private func loadReplayParts(sessions: [DouyuReplaySession], douyu: Douyu) async -> [Int: [DouyuReplayPart]] {
+		let maxConcurrent = 4
+		var result = [Int: [DouyuReplayPart]]()
+		await withTaskGroup(of: (Int, [DouyuReplayPart]).self) { group in
+			var next = 0
+			func addTask() {
+				let session = sessions[next]
+				next += 1
+				group.addTask {
+					let parts = (try? await douyu.replayParts(hashId: session.hashId, upId: session.upID)) ?? []
+					return (session.showId, parts)
+				}
+			}
+			while next < sessions.count, next < maxConcurrent {
+				addTask()
+			}
+			while let (showId, parts) = await group.next() {
+				if !parts.isEmpty {
+					result[showId] = parts
+				}
+				if next < sessions.count {
+					addTask()
+				}
+			}
+		}
+		return result
+	}
+
+	private func sessionTitle(_ session: DouyuReplaySession) -> String {
+		var parts: [String] = []
+		if session.recordedAt > 0 {
+			let formatter = DateFormatter()
+			formatter.dateFormat = "MM-dd HH:mm"
+			parts.append(formatter.string(from: Date(timeIntervalSince1970: TimeInterval(session.recordedAt))))
+		}
+		parts.append(session.title)
+		if !session.durationStr.isEmpty {
+			parts.append(session.durationStr)
+		}
+		if session.partCount > 1 {
+			parts.append("\(session.partCount)P")
+		}
+		return parts.joined(separator: " · ")
+	}
+
+	private func partTitle(_ remark: String, _ duration: String, progress: ReplayProgressStore.Progress?) -> String {
+		var parts: [String] = []
+		if !remark.isEmpty {
+			parts.append(remark)
+		}
+		if !duration.isEmpty {
+			parts.append(duration)
+		}
+		if let progress {
+			if progress.completed {
+				parts.append(NSLocalizedString("Douyu.Replay.Watched", comment: "Watched"))
+			} else if progress.duration > 0, progress.position > 0 {
+				let percent = min(99, Int(progress.position / progress.duration * 100))
+				parts.append(String(format: NSLocalizedString("Douyu.Replay.Progress", comment: "Progress %d%%"), percent))
+			}
+		}
+		return parts.joined(separator: " · ")
+	}
+
+	private func showDouyuReplayAlert(_ error: any Error) {
+		let alert = NSAlert()
+		alert.alertStyle = .warning
+		switch error {
+		case VideoGetError.douyuReplayEmpty:
+			alert.messageText = NSLocalizedString("Douyu.Replay.MenuItem", comment: "Douyu Replays")
+			alert.informativeText = NSLocalizedString("VideoGetError.douyuReplayEmpty", comment: "No replay found")
+		default:
+			alert.messageText = NSLocalizedString("VideoGetError.oops", comment: "ಠ_ಠ  oops, ")
+				+ NSLocalizedString("VideoGetError.default", comment: "something went wrong.")
+		}
+		guard let window = view.window else {
+			alert.runModal()
+			return
+		}
+		alert.beginSheetModal(for: window)
+	}
 }

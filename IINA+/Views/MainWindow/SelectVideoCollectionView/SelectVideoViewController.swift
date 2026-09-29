@@ -99,7 +99,7 @@ class SelectVideoViewController: NSViewController {
             if !node.longTitle.isEmpty {
                 s += "  \(node.longTitle)"
             }
-        case .douyu, .huya, .biliLive, .cc163:
+        case .douyu, .douyuVod, .huya, .biliLive, .cc163:
             s = (node.isLiving ? "🔥" : "") + node.title
         default:
             break
@@ -189,7 +189,7 @@ extension SelectVideoViewController: NSOutlineViewDataSource, NSOutlineViewDeleg
             } else {
                 u = "https://www.bilibili.com/video/\(item.bvid)?p=\(item.index)"
             }
-        case .douyu, .huya, .biliLive:
+        case .douyu, .douyuVod, .huya, .biliLive:
             u = item.url
         case .bangumi:
             u = "https://www.bilibili.com/bangumi/play/ep\(item.id)"

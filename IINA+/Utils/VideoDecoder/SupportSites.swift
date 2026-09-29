@@ -14,6 +14,7 @@ enum SupportSites {
     case bilibili
     case bangumi
     case douyu
+    case douyuVod
     case huya
     case cc163
     case douyin
@@ -39,6 +40,11 @@ enum SupportSites {
         .douyu: [
             "www.douyu.com",
             "douyu.com"
+        ],
+        // 斗鱼视频（直播录像回放），与直播间是不同的站点与解析路径
+        .douyuVod: [
+            "v.douyu.com",
+            "vmobile.douyu.com"
         ],
         .huya: [
             "www.huya.com",
@@ -114,6 +120,8 @@ enum SupportSites {
 			return NSLocalizedString("SupportSites.Bilibili Bangumi", comment: "Bilibili Bangumi")
 		case .douyu:
 			return NSLocalizedString("SupportSites.Douyu", comment: "Douyu")
+		case .douyuVod:
+			return NSLocalizedString("SupportSites.DouyuReplay", comment: "Douyu Replay")
 		case .huya:
 			return NSLocalizedString("SupportSites.Huya", comment: "Huya")
 		case .cc163:
@@ -130,7 +138,8 @@ enum SupportSites {
 	}
 
     func supportWebPlayer() -> Bool {
-		![.bilibili, .bangumi, .b23, .local].contains(self)
+		// .douyuVod 是 HLS 回放，只有直播间才走 flvjs 的 web 播放器
+		![.bilibili, .bangumi, .b23, .local, .douyuVod].contains(self)
     }
 
 	var urlFilterPredicate: String {

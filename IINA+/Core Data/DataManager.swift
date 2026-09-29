@@ -55,7 +55,7 @@ class DataManager: NSObject {
             return
         }
         
-        let refreshInterval: CGFloat = [.bangumi, .bilibili, .unsupported].contains(site) ? 300 : 20
+        let refreshInterval: CGFloat = [.bangumi, .bilibili, .douyuVod, .unsupported].contains(site) ? 300 : 20
         
         let rt = await tokenBucket.withToken {
             // Inited

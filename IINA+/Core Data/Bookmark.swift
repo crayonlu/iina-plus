@@ -37,7 +37,9 @@ public class Bookmark: NSManagedObject {
             liveName = "Bangumi"
         }
         
-        if isLiveSite {
+        if site == .douyuVod {
+            state = LiveState.replay.raw
+        } else if isLiveSite {
             state = (info.isLiving ? LiveState.living : LiveState.offline).raw
         } else if info.site == .bangumi || info.site == .bilibili {
             state = LiveState.video.raw

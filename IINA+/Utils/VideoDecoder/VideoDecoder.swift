@@ -53,6 +53,8 @@ actor VideoDecoder {
 			try await bilibili.live.decodeUrl(url)
         case .douyu:
 			try await douyu.decodeUrl(url)
+        case .douyuVod:
+			try await douyu.decodeVodUrl(url)
         case .huya:
 			try await huya.decodeUrl(url)
         case .bilibili, .bangumi:
@@ -75,6 +77,8 @@ actor VideoDecoder {
 			return try await bilibili.live.liveInfo(url)
         case .douyu:
 			return try await douyu.liveInfo(url)
+        case .douyuVod:
+			return try await douyu.vodInfo(url)
         case .huya:
 			return try await huya.liveInfo(url)
         case .bilibili, .bangumi:
@@ -197,6 +201,19 @@ actor VideoDecoder {
 				re.streams[key]?.url = url
 				return re
 			}
+		case .douyuVod:
+			// 播放地址已是本地回放列表地址；这里只补上续播/存位参数。
+			// watch_later 是按播放列表里的「条目地址」记账的（不是列表地址），
+			// 所以进度要绑在分P自己的那条稳定地址上。
+			guard let stream = json.streams[key],
+				  let hashId = DouyuReplayURL.hashId(from: json.rawUrl) else {
+				return json
+			}
+			let itemURL = DouyuReplayURL.stream(hashId: hashId, level: stream.quality)
+			let options = await ReplayProgressStore.shared.beginPlayback(id: hashId, url: itemURL)
+			var re = json
+			re.extraMpvOptions = options
+			return re
 		default:
 			return json
 		}
@@ -318,6 +335,8 @@ enum VideoGetError: Error {
     case douyuNotFoundRoomId
     case douyuNotFoundSubRooms
     case douyuRoomIdsCountError
+    case douyuReplayEmpty
+    case douyuReplayFailed(String)
     
     case isNotLiving
     case notFindUrls
