@@ -1138,6 +1138,7 @@ extension MainViewController: NSMenuDelegate {
         default:
             if menu == bookmarkTableView.menu {
                 initDouyuReplayMenuItem()
+                updateDouyuReplayMenuItem()
             }
             return
         }
@@ -1215,26 +1216,35 @@ extension MainViewController {
 		return selected >= 0 && selected < bookmarks.count ? selected : -1
 	}
 
-	/// 右键菜单里的「直播回放」只在斗鱼直播间书签上出现。
+	/// 书签右键菜单里常驻一项「直播回放」，右键的不是斗鱼直播间时隐藏。
+	///
+	/// storyboard 里这个菜单本身没有 delegate（只有 Site / Live State 子菜单有），
+	/// 弹出时收不到 menuNeedsUpdate，所以这里既要自己补上 delegate，也要无条件装一次。
 	func initDouyuReplayMenuItem() {
 		guard let menu = bookmarkTableView.menu else {
 			Log("Douyu replay: bookmark menu not found.")
 			return
 		}
-		if let item = douyuReplayMenuItem {
-			menu.removeItem(item)
-			douyuReplayMenuItem = nil
-		}
-		guard let row = clickedBookmarkRowIfValid(),
-			  SupportSites(url: bookmarks[row].url) == .douyu else {
-			return
-		}
+		menu.delegate = self
+		guard douyuReplayMenuItem == nil else { return }
 		let item = NSMenuItem(title: NSLocalizedString("Douyu.Replay.MenuItem", comment: "Douyu Replays"),
 							  action: #selector(douyuReplays(_:)),
 							  keyEquivalent: "")
 		item.target = self
 		menu.addItem(item)
 		douyuReplayMenuItem = item
+		Log("Douyu replay: menu item installed.")
+	}
+
+	/// 右键行不是斗鱼直播间就隐藏；判断不出来时保持可见。
+	func updateDouyuReplayMenuItem() {
+		guard let item = douyuReplayMenuItem else { return }
+		let row = clickedBookmarkRow()
+		guard row >= 0, row < bookmarks.count else {
+			item.isHidden = false
+			return
+		}
+		item.isHidden = SupportSites(url: bookmarks[row].url) != .douyu
 	}
 
 	private func clickedBookmarkRowIfValid() -> Int? {
@@ -1245,6 +1255,10 @@ extension MainViewController {
 	@IBAction func douyuReplays(_ sender: NSMenuItem) {
 		guard let row = clickedBookmarkRowIfValid() else { return }
 		let url = bookmarks[row].url
+		guard SupportSites(url: url) == .douyu else {
+			Log("Douyu replay: \(url) is not a douyu live room.")
+			return
+		}
 		Task {
 			await showDouyuReplays(url)
 		}
